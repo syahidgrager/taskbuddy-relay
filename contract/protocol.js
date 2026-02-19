@@ -1,4 +1,4 @@
-import {Protocol} from "trac-peer";
+﻿import {Protocol} from "trac-peer";
 import { bufferToBigInt, bigIntToDecimalString } from "trac-msb/src/utils/amountSerialization.js";
 import b4a from "b4a";
 import PeerWallet from "trac-wallet";
@@ -114,9 +114,13 @@ class SampleProtocol extends Protocol{
      * @returns {Promise<void>}
      */
     async extendApi(){
-        this.api.getSampleData = function(){
-            return 'Some sample data';
-        }
+        this.api.getAppInfo = function(){
+            return {
+                app: 'taskbuddy-relay',
+                description: 'P2P task handoff coordination on top of Intercom',
+                version: 1
+            };
+        };
     }
 
     /**
@@ -132,76 +136,120 @@ class SampleProtocol extends Protocol{
      * @returns {{type: string, value: *}|null}
      */
     mapTxCommand(command){
-        // prepare the payload
-        let obj = { type : '', value : null };
-        /*
-        Triggering contract function in terminal will look like this:
+        const cmd = String(command || '').trim();
+        let obj = { type: '', value: null };
 
-        /tx --command 'something'
-
-        You can also simulate a tx prior broadcast
-
-        /tx --command 'something' --sim 1
-
-        To programmatically execute a transaction from "outside",
-        the api function "this.api.tx()" needs to be exposed by adding
-        "api_tx_exposed : true" to the Peer instance options.
-        Once exposed, it can be used directly through peer.protocol_instance.api.tx()
-
-        Please study the superclass of this Protocol and Protocol.api to learn more.
-        */
-        if(command === 'something'){
-            // type points at the "storeSomething" function in the contract.
-            obj.type = 'storeSomething';
-            // value can be null as there is no other payload, but the property must exist.
-            obj.value = null;
-            // return the payload to be used in your contract
-            return obj;
-        } else if (command === 'read_snapshot') {
+        if (cmd === 'task_snapshot' || cmd === 'read_snapshot') {
             obj.type = 'readSnapshot';
             obj.value = null;
             return obj;
-        } else if (command === 'read_chat_last') {
-            obj.type = 'readChatLast';
-            obj.value = null;
-            return obj;
-        } else if (command === 'read_timer') {
+        }
+
+        if (cmd === 'read_timer') {
             obj.type = 'readTimer';
             obj.value = null;
             return obj;
-        } else {
-            /*
-            now we assume our protocol allows to submit a json string with information
-            what to do (the op) then we pass the parsed object to the value.
-            the accepted json string can be executed as tx like this:
-
-            /tx --command '{ "op" : "do_something", "some_key" : "some_data" }'
-
-            Of course we can simulate this, as well:
-
-            /tx --command '{ "op" : "do_something", "some_key" : "some_data" }' --sim 1
-            */
-            const json = this.safeJsonParse(command);
-            if(json.op !== undefined && json.op === 'do_something'){
-                obj.type = 'submitSomething';
-                obj.value = json;
-                return obj;
-            } else if (json.op !== undefined && json.op === 'read_key') {
-                obj.type = 'readKey';
-                obj.value = json;
-                return obj;
-            } else if (json.op !== undefined && json.op === 'read_chat_last') {
-                obj.type = 'readChatLast';
-                obj.value = null;
-                return obj;
-            } else if (json.op !== undefined && json.op === 'read_timer') {
-                obj.type = 'readTimer';
-                obj.value = null;
-                return obj;
-            }
         }
-        // return null if no case matches.
-        // if you do not return null, your protocol might behave unexpected.
+
+        if (cmd === 'task_list' || cmd === 'list_tasks') {
+            obj.type = 'listTasks';
+            obj.value = { op: 'list_tasks', limit: 20 };
+            return obj;
+        }
+
+        if (cmd.startsWith('task_list:')) {
+            const limitRaw = cmd.slice('task_list:'.length).trim();
+            const parsedLimit = Number.parseInt(limitRaw, 10);
+            obj.type = 'listTasks';
+            obj.value = {
+                op: 'list_tasks',
+                limit: Number.isFinite(parsedLimit) ? parsedLimit : 20
+            };
+            return obj;
+        }
+
+        if (cmd.startsWith('task_read:')) {
+            const taskId = cmd.slice('task_read:'.length).trim();
+            if (!taskId) return null;
+            obj.type = 'readTask';
+            obj.value = { op: 'read_task', taskId };
+            return obj;
+        }
+
+        if (cmd.startsWith('task_status:')) {
+            const status = cmd.slice('task_status:'.length).trim().toLowerCase();
+            if (!status) return null;
+            obj.type = 'listTasksByStatus';
+            obj.value = { op: 'list_tasks_by_status', status, limit: 20 };
+            return obj;
+        }
+
+        const json = this.safeJsonParse(cmd);
+        if (!json || typeof json !== 'object') return null;
+        const op = String(json.op || '').trim().toLowerCase();
+        if (!op) return null;
+
+        if (op === 'task_create') {
+            obj.type = 'taskCreate';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_claim') {
+            obj.type = 'taskClaim';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_start') {
+            obj.type = 'taskStart';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_submit') {
+            obj.type = 'taskSubmit';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_checkpoint') {
+            obj.type = 'taskCheckpoint';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_handoff') {
+            obj.type = 'taskHandoff';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_cancel') {
+            obj.type = 'taskCancel';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'task_settle') {
+            obj.type = 'taskSettle';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'read_task') {
+            obj.type = 'readTask';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'list_tasks') {
+            obj.type = 'listTasks';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'list_tasks_by_status') {
+            obj.type = 'listTasksByStatus';
+            obj.value = json;
+            return obj;
+        }
+        if (op === 'read_snapshot') {
+            obj.type = 'readSnapshot';
+            obj.value = null;
+            return obj;
+        }
+
         return null;
     }
 
@@ -212,11 +260,24 @@ class SampleProtocol extends Protocol{
      */
     async printOptions(){
         console.log(' ');
-        console.log('- Sample Commands:');
-        console.log("- /print | use this flag to print some text to the terminal: '--text \"I am printing\"");
+        console.log('- Task Mesh Commands:');
+        console.log('- /task_examples | print ready-to-use /tx payloads for task lifecycle.');
         console.log('- /get --key "<key>" [--confirmed true|false] | reads subnet state key (confirmed defaults to true).');
         console.log('- /msb | prints MSB txv + lengths (local MSB node view).');
-        console.log('- /tx --command "read_chat_last" | prints last chat message captured by contract.');
+        console.log('- /tx --command "task_snapshot" | prints task counters + last task snapshot.');
+        console.log('- /tx --command "task_list" | prints latest tasks (default limit=20).');
+        console.log('- /tx --command "task_list:50" | prints latest tasks with explicit limit.');
+        console.log('- /tx --command "task_read:<taskId>" | prints one task.');
+        console.log('- /tx --command "task_status:open" | prints tasks filtered by status.');
+        console.log('- /task_wizard | terminal quick menu for first-time users.');
+        console.log('- /tx --command \'{"op":"task_checkpoint","taskId":"task-001","note":"50% done","percent":50}\'');
+        console.log('- /tx --command \'{"op":"task_handoff","taskId":"task-001","nextAssignee":"trac1...","reason":"handover"}\'');
+        console.log('- /tx --command \'{"op":"task_create","taskId":"task-001","title":"...","description":"...","channel":"task/task-001"}\'');
+        console.log('- /tx --command \'{"op":"task_claim","taskId":"task-001"}\'');
+        console.log('- /tx --command \'{"op":"task_start","taskId":"task-001"}\'');
+        console.log('- /tx --command \'{"op":"task_submit","taskId":"task-001","result":"deliverable"}\'');
+        console.log('- /tx --command \'{"op":"task_cancel","taskId":"task-001","reason":"..."}\'');
+        console.log('- /tx --command \'{"op":"task_settle","taskId":"task-001","amount":"10 TNK","txRef":"0x..."}\'');
         console.log('- /tx --command "read_timer" | prints current timer feature value.');
         console.log('- /sc_join --channel "<name>" | join an ephemeral sidechannel (no autobase).');
         console.log('- /sc_open --channel "<name>" [--via "<channel>"] [--invite <json|b64|@file>] [--welcome <json|b64|@file>] | request others to open a sidechannel.');
@@ -224,7 +285,6 @@ class SampleProtocol extends Protocol{
         console.log('- /sc_invite --channel "<name>" --pubkey "<peer-pubkey-hex>" [--ttl <sec>] [--welcome <json|b64|@file>] | create a signed invite.');
         console.log('- /sc_welcome --channel "<name>" --text "<message>" | create a signed welcome.');
         console.log('- /sc_stats | show sidechannel channels + connection count.');
-        // further protocol specific options go here
     }
 
     /**
@@ -271,6 +331,32 @@ class SampleProtocol extends Protocol{
                 peerMsbBalance: balance,
                 msbFee: fee,
             });
+            return;
+        }
+        if (this.input.startsWith("/task_examples")) {
+            console.log('Task Mesh /tx examples:');
+            console.log('/tx --command \'{"op":"task_create","taskId":"task-001","title":"Summarize proposal","description":"Create concise summary for partner sync","reward":"10 TNK","channel":"task/task-001"}\'');
+            console.log('/tx --command \'{"op":"task_claim","taskId":"task-001"}\'');
+            console.log('/tx --command \'{"op":"task_start","taskId":"task-001"}\'');
+            console.log('/tx --command \'{"op":"task_checkpoint","taskId":"task-001","note":"halfway complete","percent":50}\'');
+            console.log('/tx --command \'{"op":"task_handoff","taskId":"task-001","nextAssignee":"trac1next...","reason":"timezone handoff"}\'');
+            console.log('/tx --command \'{"op":"task_submit","taskId":"task-001","result":"Summary sent in sidechannel task/task-001"}\'');
+            console.log('/tx --command \'{"op":"task_settle","taskId":"task-001","amount":"10 TNK","txRef":"0xabc123"}\'');
+            console.log('/tx --command "task_snapshot"');
+            console.log('/tx --command "task_list:50"');
+            console.log('/tx --command "task_status:open"');
+            console.log('/tx --command "task_read:task-001"');
+            return;
+        }
+        if (this.input.startsWith("/task_wizard")) {
+            console.log('Task Wizard (terminal UI):');
+            console.log('1) Create task  -> /tx --command \'{"op":"task_create","taskId":"task-001","title":"Write summary","description":"Create concise summary","reward":"10 TNK","channel":"task/task-001"}\'');
+            console.log('2) Claim task   -> /tx --command \'{"op":"task_claim","taskId":"task-001"}\'');
+            console.log('3) Start task   -> /tx --command \'{"op":"task_start","taskId":"task-001"}\'');
+            console.log('4) Checkpoint   -> /tx --command \'{"op":"task_checkpoint","taskId":"task-001","note":"halfway complete","percent":50}\'');
+            console.log('5) Handoff      -> /tx --command \'{"op":"task_handoff","taskId":"task-001","nextAssignee":"trac1next...","reason":"timezone handoff"}\'');
+            console.log('6) Submit task  -> /tx --command \'{"op":"task_submit","taskId":"task-001","result":"Delivered in sidechannel"}\'');
+            console.log('7) Settle task  -> /tx --command \'{"op":"task_settle","taskId":"task-001","amount":"10 TNK","txRef":"tx-001"}\'');
             return;
         }
         if (this.input.startsWith("/sc_join")) {
@@ -597,3 +683,4 @@ class SampleProtocol extends Protocol{
 }
 
 export default SampleProtocol;
+
